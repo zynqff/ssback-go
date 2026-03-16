@@ -30,7 +30,7 @@ func Load() {
 		GroqAPIKey:         os.Getenv("GROQ_API_KEY"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		SecretKey:          getOrDefault("SECRET_KEY", "sUper_sEcrEt_kEy_fOr_pRojeCt_2024_Go"),
+		SecretKey:          mustGet("SECRET_KEY"),
 		AdminUsernames:     splitEnv("ADMIN_USERNAMES"),
 		AdminPasswords:     splitEnv("ADMIN_PASSWORDS"),
 		Port:               getOrDefault("PORT", "8000"),
