@@ -23,10 +23,10 @@ func main() {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{"https://ssback-go.onrender.com", "http://localhost:*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 	}))
 
 	// ── Public routes ─────────────────────────────────────────────────────────
@@ -79,5 +79,7 @@ func main() {
 
 	addr := ":" + config.C.Port
 	fmt.Printf("🚀 Server running on %s\n", addr)
-	http.ListenAndServe(addr, r)
+	if err := http.ListenAndServe(addr, r); err != nil {
+		panic(err)
+	}
 }
