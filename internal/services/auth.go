@@ -9,10 +9,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// virtualAdminState stores in-memory state for virtual admins
 var (
-	virtualAdminReadPoems   = make(map[string][]string)
-	virtualAdminPinnedPoems = make(map[string]*string)
+	virtualAdminReadPoems   = make(map[string][]int64)
+	virtualAdminPinnedPoems = make(map[string]*int64)
 	vaMu                    sync.Mutex
 )
 
@@ -21,7 +20,6 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// Username возвращает имя пользователя из стандартного поля Subject
 func (c *Claims) Username() string {
 	return c.Subject
 }
@@ -76,45 +74,45 @@ func CheckVirtualAdmin(username, password string) bool {
 	return ok && p == password
 }
 
-func GetVirtualAdminReadPoems(username string) []string {
+func GetVirtualAdminReadPoems(username string) []int64 {
 	vaMu.Lock()
 	defer vaMu.Unlock()
 	r := virtualAdminReadPoems[username]
 	if r == nil {
-		return []string{}
+		return []int64{}
 	}
 	return r
 }
 
-func GetVirtualAdminPinnedPoem(username string) *string {
+func GetVirtualAdminPinnedPoem(username string) *int64 {
 	vaMu.Lock()
 	defer vaMu.Unlock()
 	return virtualAdminPinnedPoems[username]
 }
 
-func ToggleVirtualAdminRead(username, title string) string {
+func ToggleVirtualAdminRead(username string, poemID int64) string {
 	vaMu.Lock()
 	defer vaMu.Unlock()
 	reads := virtualAdminReadPoems[username]
-	for i, t := range reads {
-		if t == title {
+	for i, id := range reads {
+		if id == poemID {
 			virtualAdminReadPoems[username] = append(reads[:i], reads[i+1:]...)
 			return "unmarked"
 		}
 	}
-	virtualAdminReadPoems[username] = append(reads, title)
+	virtualAdminReadPoems[username] = append(reads, poemID)
 	return "marked"
 }
 
-func ToggleVirtualAdminPinned(username, title string) (string, *string) {
+func ToggleVirtualAdminPinned(username string, poemID int64) (string, *int64) {
 	vaMu.Lock()
 	defer vaMu.Unlock()
 	cur := virtualAdminPinnedPoems[username]
-	if cur != nil && *cur == title {
+	if cur != nil && *cur == poemID {
 		virtualAdminPinnedPoems[username] = nil
 		return "unpinned", nil
 	}
-	t := title
-	virtualAdminPinnedPoems[username] = &t
-	return "pinned", &t
+	id := poemID
+	virtualAdminPinnedPoems[username] = &id
+	return "pinned", &id
 }
