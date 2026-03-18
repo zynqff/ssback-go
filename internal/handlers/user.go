@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/ssback/internal/db"
@@ -16,12 +15,12 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 
 	if services.IsVirtualAdmin(claims.Subject) {
 		writeJSON(w, 200, models.MeResponse{
-			Username:        claims.Subject,
-			IsAdmin:         true,
-			ReadPoems:       services.GetVirtualAdminReadPoems(claims.Subject),
-			PinnedPoemTitle: services.GetVirtualAdminPinnedPoem(claims.Subject),
-			ShowAllTab:      false,
-			UserData:        "",
+			Username:     claims.Subject,
+			IsAdmin:      true,
+			ReadPoems:    services.GetVirtualAdminReadPoems(claims.Subject),
+			PinnedPoemID: services.GetVirtualAdminPinnedPoem(claims.Subject),
+			ShowAllTab:   false,
+			UserData:     "",
 		})
 		return
 	}
@@ -34,16 +33,16 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 
 	reads := user.ReadPoemsJSON
 	if reads == nil {
-		reads = []string{}
+		reads = []int64{}
 	}
 
 	writeJSON(w, 200, models.MeResponse{
-		Username:        user.Username,
-		IsAdmin:         user.IsAdmin,
-		ReadPoems:       reads,
-		PinnedPoemTitle: user.PinnedPoemTitle,
-		ShowAllTab:      user.ShowAllTab,
-		UserData:        user.UserData,
+		Username:     user.Username,
+		IsAdmin:      user.IsAdmin,
+		ReadPoems:    reads,
+		PinnedPoemID: user.PinnedPoemID,
+		ShowAllTab:   user.ShowAllTab,
+		UserData:     user.UserData,
 	})
 }
 
@@ -99,63 +98,49 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 func ToggleRead(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 
-	log.Printf("[toggle_read] subject=%q", claims.Subject)
-
 	var req models.ToggleRequest
-	if err := decode(r, &req); err != nil || req.Title == "" {
-		writeError(w, 400, "title required")
+	if err := decode(r, &req); err != nil || req.PoemID == 0 {
+		writeError(w, 400, "poem_id required")
 		return
 	}
 
 	if services.IsVirtualAdmin(claims.Subject) {
-		action := services.ToggleVirtualAdminRead(claims.Subject, req.Title)
+		action := services.ToggleVirtualAdminRead(claims.Subject, req.PoemID)
 		writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action})
 		return
 	}
 
 	var user models.User
 	if err := db.DB.SelectOne("user", map[string]string{"username": claims.Subject}, &user); err != nil || user.Username == "" {
-		log.Printf("[toggle_read] user not found for subject=%q", claims.Subject)
 		writeError(w, 404, "пользователь не найден")
 		return
 	}
 
-	log.Printf("[toggle_read] found user=%q password_hash_len=%d reads=%v", user.Username, len(user.PasswordHash), user.ReadPoemsJSON)
-
 	reads := user.ReadPoemsJSON
 	if reads == nil {
-		reads = []string{}
+		reads = []int64{}
 	}
 
 	action := "marked"
-	newReads := []string{}
+	newReads := []int64{}
 	found := false
-	for _, t := range reads {
-		if t == req.Title {
+	for _, id := range reads {
+		if id == req.PoemID {
 			found = true
 			action = "unmarked"
 		} else {
-			newReads = append(newReads, t)
+			newReads = append(newReads, id)
 		}
 	}
 	if !found {
-		newReads = append(newReads, req.Title)
+		newReads = append(newReads, req.PoemID)
 	}
-
-	log.Printf("[toggle_read] updating user=%q newReads=%v", user.Username, newReads)
 
 	if err := db.DB.Update("user", map[string]string{"username": claims.Subject}, map[string]interface{}{
 		"read_poems_json": newReads,
 	}); err != nil {
-		log.Printf("[toggle_read] db error: %v", err)
 		writeError(w, 500, "db error")
 		return
-	}
-
-	// Проверяем что password_hash не пропал после update
-	var userAfter models.User
-	if err := db.DB.SelectOne("user", map[string]string{"username": claims.Subject}, &userAfter); err == nil {
-		log.Printf("[toggle_read] after update: password_hash_len=%d reads=%v", len(userAfter.PasswordHash), userAfter.ReadPoemsJSON)
 	}
 
 	writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action})
@@ -166,14 +151,14 @@ func TogglePin(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 
 	var req models.ToggleRequest
-	if err := decode(r, &req); err != nil || req.Title == "" {
-		writeError(w, 400, "title required")
+	if err := decode(r, &req); err != nil || req.PoemID == 0 {
+		writeError(w, 400, "poem_id required")
 		return
 	}
 
 	if services.IsVirtualAdmin(claims.Subject) {
-		action, pinned := services.ToggleVirtualAdminPinned(claims.Subject, req.Title)
-		writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action, PinnedTitle: pinned})
+		action, pinned := services.ToggleVirtualAdminPinned(claims.Subject, req.PoemID)
+		writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action, PinnedPoemID: pinned})
 		return
 	}
 
@@ -183,22 +168,22 @@ func TogglePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var newPinned *string
+	var newPinned *int64
 	action := "pinned"
-	if user.PinnedPoemTitle != nil && *user.PinnedPoemTitle == req.Title {
+	if user.PinnedPoemID != nil && *user.PinnedPoemID == req.PoemID {
 		action = "unpinned"
 		newPinned = nil
 	} else {
-		t := req.Title
-		newPinned = &t
+		id := req.PoemID
+		newPinned = &id
 	}
 
 	if err := db.DB.Update("user", map[string]string{"username": claims.Subject}, map[string]interface{}{
-		"pinned_poem_title": newPinned,
+		"pinned_poem_id": newPinned,
 	}); err != nil {
 		writeError(w, 500, "db error")
 		return
 	}
 
-	writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action, PinnedTitle: newPinned})
+	writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action, PinnedPoemID: newPinned})
 }
