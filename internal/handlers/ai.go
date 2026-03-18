@@ -24,7 +24,7 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 
 	if !hasAccess {
 		var user models.User
-		_ = db.DB.SelectOne("user", map[string]string{"username": claims.Username}, &user)
+		_ = db.DB.SelectOne("user", map[string]string{"username": claims.Subject}, &user)
 		if user.UserGeminiKey != "" && services.ValidateAndUseKey(user.UserGeminiKey) {
 			hasAccess = true
 		}
@@ -35,7 +35,7 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := services.GetChatHistory(claims.Username)
+	history, err := services.GetChatHistory(claims.Subject)
 	if err != nil {
 		history = []models.ChatMessage{}
 	}
@@ -46,8 +46,8 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = services.SaveChatMessage(claims.Username, "user", req.Prompt)
-	_ = services.SaveChatMessage(claims.Username, "assistant", response)
+	_ = services.SaveChatMessage(claims.Subject, "user", req.Prompt)
+	_ = services.SaveChatMessage(claims.Subject, "assistant", response)
 
 	writeJSON(w, 200, map[string]string{"response": response})
 }
@@ -67,7 +67,7 @@ func AIVerifyKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.DB.Update("user", map[string]string{"username": claims.Username}, map[string]interface{}{
+	if err := db.DB.Update("user", map[string]string{"username": claims.Subject}, map[string]interface{}{
 		"user_gemini_key": req.Key,
 	}); err != nil {
 		writeError(w, 500, "db error")
@@ -94,7 +94,7 @@ func AIGenerateKey(w http.ResponseWriter, r *http.Request) {
 		dailyLimit = &req.DailyLimit
 	}
 
-	key, err := services.SaveAPIKey(claims.Username, expiresAt, dailyLimit)
+	key, err := services.SaveAPIKey(claims.Subject, expiresAt, dailyLimit)
 	if err != nil {
 		writeError(w, 500, "failed to generate key")
 		return
@@ -105,7 +105,7 @@ func AIGenerateKey(w http.ResponseWriter, r *http.Request) {
 // GET /api/ai/keys (admin)
 func AIGetKeys(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
-	keys, err := services.GetKeysForAdmin(claims.Username)
+	keys, err := services.GetKeysForAdmin(claims.Subject)
 	if err != nil {
 		writeError(w, 500, "db error")
 		return
