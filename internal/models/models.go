@@ -3,17 +3,18 @@ package models
 import "time"
 
 type User struct {
-	Username        string   `json:"username"`
-	PasswordHash    string   `json:"password_hash,omitempty"`
-	IsAdmin         bool     `json:"is_admin"`
-	ReadPoemsJSON   []string `json:"read_poems_json"`
-	PinnedPoemTitle *string  `json:"pinned_poem_title"`
-	ShowAllTab      bool     `json:"show_all_tab"`
-	UserData        string   `json:"user_data"`
-	UserGeminiKey   string   `json:"user_gemini_key,omitempty"`
+	Username      string  `json:"username"`
+	PasswordHash  string  `json:"password_hash,omitempty"`
+	IsAdmin       bool    `json:"is_admin"`
+	ReadPoemsJSON []int64 `json:"read_poems_json"`
+	PinnedPoemID  *int64  `json:"pinned_poem_id"`
+	ShowAllTab    bool    `json:"show_all_tab"`
+	UserData      string  `json:"user_data"`
+	UserGeminiKey string  `json:"user_gemini_key,omitempty"`
 }
 
 type Poem struct {
+	ID        int64  `json:"id"`
 	Title     string `json:"title"`
 	Author    string `json:"author"`
 	Text      string `json:"text"`
@@ -35,8 +36,6 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-// Request/response types
-
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -54,13 +53,13 @@ type LoginResponse struct {
 }
 
 type ToggleRequest struct {
-	Title string `json:"title"`
+	PoemID int64 `json:"poem_id"`
 }
 
 type ToggleResponse struct {
-	Success     bool    `json:"success"`
-	Action      string  `json:"action"`
-	PinnedTitle *string `json:"pinned_title,omitempty"`
+	Success      bool   `json:"success"`
+	Action       string `json:"action"`
+	PinnedPoemID *int64 `json:"pinned_poem_id,omitempty"`
 }
 
 type PoemCreate struct {
@@ -93,10 +92,10 @@ type GoogleMobileRequest struct {
 }
 
 type MeResponse struct {
-	Username        string   `json:"username"`
-	IsAdmin         bool     `json:"is_admin"`
-	ReadPoems       []string `json:"read_poems"`
-	PinnedPoemTitle *string  `json:"pinned_poem_title"`
-	ShowAllTab      bool     `json:"show_all_tab"`
-	UserData        string   `json:"user_data"`
+	Username     string  `json:"username"`
+	IsAdmin      bool    `json:"is_admin"`
+	ReadPoems    []int64 `json:"read_poems"`
+	PinnedPoemID *int64  `json:"pinned_poem_id"`
+	ShowAllTab   bool    `json:"show_all_tab"`
+	UserData     string  `json:"user_data"`
 }
