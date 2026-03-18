@@ -17,16 +17,20 @@ var (
 )
 
 type Claims struct {
-	Username string `json:"sub"`
-	IsAdmin  bool   `json:"is_admin"`
+	IsAdmin bool `json:"is_admin"`
 	jwt.RegisteredClaims
+}
+
+// Username возвращает имя пользователя из стандартного поля Subject
+func (c *Claims) Username() string {
+	return c.Subject
 }
 
 func CreateAccessToken(username string, isAdmin bool) (string, error) {
 	claims := Claims{
-		Username: username,
-		IsAdmin:  isAdmin,
+		IsAdmin: isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   username,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 		},
 	}
