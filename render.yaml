@@ -17,9 +17,5 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
-      - key: ADMIN_USERNAMES
-        sync: false
-      - key: ADMIN_PASSWORDS
-        sync: false
       - key: PORT
         value: "8000"
