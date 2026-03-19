@@ -4,7 +4,7 @@ import "time"
 
 type User struct {
 	Username      string  `json:"username"`
-	PasswordHash  string  `json:"password_hash,omitempty"`
+	PasswordHash  string  `json:"-"`
 	IsAdmin       bool    `json:"is_admin"`
 	ReadPoemsJSON []int64 `json:"read_poems_json"`
 	PinnedPoemID  *int64  `json:"pinned_poem_id"`
