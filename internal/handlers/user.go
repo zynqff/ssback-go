@@ -6,6 +6,7 @@ import (
 	"github.com/ssback/internal/db"
 	"github.com/ssback/internal/middleware"
 	"github.com/ssback/internal/models"
+	"github.com/ssback/internal/services"
 )
 
 // GET /api/me
@@ -50,7 +51,7 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "пароль не менее 4 символов")
 			return
 		}
-		hash, err := hashPassword(*req.NewPassword)
+		hash, err := services.HashPassword(*req.NewPassword)
 		if err != nil {
 			writeError(w, 500, "hash error")
 			return
