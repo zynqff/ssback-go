@@ -6,24 +6,11 @@ import (
 	"github.com/ssback/internal/db"
 	"github.com/ssback/internal/middleware"
 	"github.com/ssback/internal/models"
-	"github.com/ssback/internal/services"
 )
 
 // GET /api/me
 func GetMe(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
-
-	if services.IsVirtualAdmin(claims.Subject) {
-		writeJSON(w, 200, models.MeResponse{
-			Username:     claims.Subject,
-			IsAdmin:      true,
-			ReadPoems:    services.GetVirtualAdminReadPoems(claims.Subject),
-			PinnedPoemID: services.GetVirtualAdminPinnedPoem(claims.Subject),
-			ShowAllTab:   false,
-			UserData:     "",
-		})
-		return
-	}
 
 	var user models.User
 	if err := db.DB.SelectOne("user", map[string]string{"username": claims.Subject}, &user); err != nil || user.Username == "" {
@@ -50,11 +37,6 @@ func GetMe(w http.ResponseWriter, r *http.Request) {
 func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 
-	if services.IsVirtualAdmin(claims.Subject) {
-		writeError(w, 403, "настройки профиля недоступны для виртуальных администраторов")
-		return
-	}
-
 	var req models.UpdateProfileRequest
 	if err := decode(r, &req); err != nil {
 		writeError(w, 400, "bad request")
@@ -68,7 +50,7 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "пароль не менее 4 символов")
 			return
 		}
-		hash, err := services.HashPassword(*req.NewPassword)
+		hash, err := hashPassword(*req.NewPassword)
 		if err != nil {
 			writeError(w, 500, "hash error")
 			return
@@ -101,12 +83,6 @@ func ToggleRead(w http.ResponseWriter, r *http.Request) {
 	var req models.ToggleRequest
 	if err := decode(r, &req); err != nil || req.PoemID == 0 {
 		writeError(w, 400, "poem_id required")
-		return
-	}
-
-	if services.IsVirtualAdmin(claims.Subject) {
-		action := services.ToggleVirtualAdminRead(claims.Subject, req.PoemID)
-		writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action})
 		return
 	}
 
@@ -153,12 +129,6 @@ func TogglePin(w http.ResponseWriter, r *http.Request) {
 	var req models.ToggleRequest
 	if err := decode(r, &req); err != nil || req.PoemID == 0 {
 		writeError(w, 400, "poem_id required")
-		return
-	}
-
-	if services.IsVirtualAdmin(claims.Subject) {
-		action, pinned := services.ToggleVirtualAdminPinned(claims.Subject, req.PoemID)
-		writeJSON(w, 200, models.ToggleResponse{Success: true, Action: action, PinnedPoemID: pinned})
 		return
 	}
 
