@@ -16,20 +16,17 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 func googleOAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     config.C.GoogleClientID,
 		ClientSecret: config.C.GoogleClientSecret,
-		RedirectURL:  "", // set per-request
+		RedirectURL:  "",
 		Scopes:       []string{"openid", "email", "profile"},
 		Endpoint:     google.Endpoint,
 	}
 }
 
-// ── POST /api/login ───────────────────────────────────────────────────────────
-
+// POST /api/login
 func Login(w http.ResponseWriter, r *http.Request) {
 	var req models.LoginRequest
 	if err := decode(r, &req); err != nil {
@@ -41,22 +38,6 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Virtual admins
-	if services.IsVirtualAdmin(req.Username) {
-		if !services.CheckVirtualAdmin(req.Username, req.Password) {
-			writeError(w, 401, "неверный пароль администратора")
-			return
-		}
-		token, err := services.CreateAccessToken(req.Username, true)
-		if err != nil {
-			writeError(w, 500, "token error")
-			return
-		}
-		writeJSON(w, 200, models.LoginResponse{AccessToken: token, IsAdmin: true, Username: req.Username})
-		return
-	}
-
-	// DB users
 	var user models.User
 	if err := db.DB.SelectOne("user", map[string]string{"username": req.Username}, &user); err != nil || user.Username == "" {
 		writeError(w, 401, "неверный логин или пароль")
@@ -74,8 +55,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, models.LoginResponse{AccessToken: token, IsAdmin: user.IsAdmin, Username: user.Username})
 }
 
-// ── POST /api/register ────────────────────────────────────────────────────────
-
+// POST /api/register
 func Register(w http.ResponseWriter, r *http.Request) {
 	var req models.RegisterRequest
 	if err := decode(r, &req); err != nil {
@@ -114,8 +94,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]bool{"success": true})
 }
 
-// ── GET /api/logout ───────────────────────────────────────────────────────────
-
+// GET /api/logout
 func Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:    "access_token",
@@ -127,10 +106,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"success": true})
 }
 
-// ── Google Web OAuth ──────────────────────────────────────────────────────────
-// GET /auth/google/login   — redirect to Google
-// GET /auth/google/callback — handle callback
-
+// GET /auth/google/login
 func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	cfg := googleOAuthConfig()
 	cfg.RedirectURL = fmt.Sprintf("%s://%s/auth/google/callback", scheme(r), r.Host)
@@ -138,6 +114,7 @@ func GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
+// GET /auth/google/callback
 func GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	cfg := googleOAuthConfig()
 	cfg.RedirectURL = fmt.Sprintf("%s://%s/auth/google/callback", scheme(r), r.Host)
@@ -178,10 +155,7 @@ func GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// ── Google Mobile Auth ────────────────────────────────────────────────────────
 // POST /api/google/mobile-auth
-// Body: {"id_token": "..."}  — idToken from google_sign_in Flutter package
-
 func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 	var req models.GoogleMobileRequest
 	if err := decode(r, &req); err != nil || req.IDToken == "" {
@@ -189,7 +163,6 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify idToken with Google tokeninfo endpoint
 	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + req.IDToken)
 	if err != nil {
 		writeError(w, 500, "google verification failed")
@@ -203,8 +176,8 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var info struct {
-		Email    string `json:"email"`
-		Aud      string `json:"aud"`
+		Email         string `json:"email"`
+		Aud           string `json:"aud"`
 		EmailVerified string `json:"email_verified"`
 	}
 	body, _ := io.ReadAll(resp.Body)
@@ -213,7 +186,13 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify audience matches our client ID
+	// Проверяем что email подтверждён
+	if info.EmailVerified != "true" {
+		writeError(w, 401, "email not verified")
+		return
+	}
+
+	// Проверяем что токен выдан для нашего приложения
 	if config.C.GoogleClientID != "" && info.Aud != config.C.GoogleClientID {
 		writeError(w, 401, "token audience mismatch")
 		return
@@ -233,7 +212,7 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// helpers
 
 func upsertGoogleUser(email string) {
 	var existing models.User
