@@ -1,7 +1,6 @@
 package services
 
 import (
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -9,19 +8,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	virtualAdminReadPoems   = make(map[string][]int64)
-	virtualAdminPinnedPoems = make(map[string]*int64)
-	vaMu                    sync.Mutex
-)
-
 type Claims struct {
 	IsAdmin bool `json:"is_admin"`
 	jwt.RegisteredClaims
-}
-
-func (c *Claims) Username() string {
-	return c.Subject
 }
 
 func CreateAccessToken(username string, isAdmin bool) (string, error) {
@@ -62,57 +51,4 @@ func CheckPassword(password, hash string) bool {
 		password = password[:72]
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
-}
-
-func IsVirtualAdmin(username string) bool {
-	_, ok := config.C.AdminsMap()[username]
-	return ok
-}
-
-func CheckVirtualAdmin(username, password string) bool {
-	p, ok := config.C.AdminsMap()[username]
-	return ok && p == password
-}
-
-func GetVirtualAdminReadPoems(username string) []int64 {
-	vaMu.Lock()
-	defer vaMu.Unlock()
-	r := virtualAdminReadPoems[username]
-	if r == nil {
-		return []int64{}
-	}
-	return r
-}
-
-func GetVirtualAdminPinnedPoem(username string) *int64 {
-	vaMu.Lock()
-	defer vaMu.Unlock()
-	return virtualAdminPinnedPoems[username]
-}
-
-func ToggleVirtualAdminRead(username string, poemID int64) string {
-	vaMu.Lock()
-	defer vaMu.Unlock()
-	reads := virtualAdminReadPoems[username]
-	for i, id := range reads {
-		if id == poemID {
-			virtualAdminReadPoems[username] = append(reads[:i], reads[i+1:]...)
-			return "unmarked"
-		}
-	}
-	virtualAdminReadPoems[username] = append(reads, poemID)
-	return "marked"
-}
-
-func ToggleVirtualAdminPinned(username string, poemID int64) (string, *int64) {
-	vaMu.Lock()
-	defer vaMu.Unlock()
-	cur := virtualAdminPinnedPoems[username]
-	if cur != nil && *cur == poemID {
-		virtualAdminPinnedPoems[username] = nil
-		return "unpinned", nil
-	}
-	id := poemID
-	virtualAdminPinnedPoems[username] = &id
-	return "pinned", &id
 }
