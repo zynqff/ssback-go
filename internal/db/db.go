@@ -107,7 +107,7 @@ func (c *Client) SelectOne(table string, filters map[string]string, result inter
 	return json.Unmarshal(arr[0], result)
 }
 
-// Insert inserts a row and returns inserted data
+// Insert inserts a row and optionally returns inserted data
 func (c *Client) Insert(table string, data interface{}, result interface{}) error {
 	prefer := ""
 	if result != nil {
@@ -123,6 +123,57 @@ func (c *Client) Update(table string, filters map[string]string, data interface{
 		q.Set(k, "eq."+v)
 	}
 	return c.do("PATCH", "/"+table, q, data, nil, "return=minimal")
+}
+
+// UpdateAtomic обновляет строку только если usage_today совпадает с ожидаемым.
+// Это оптимистичная блокировка против race condition при параллельных запросах AI.
+// Если кто-то успел изменить счётчик раньше — Supabase не найдёт строку и вернёт ошибку.
+func (c *Client) UpdateAtomic(table string, filters map[string]string, expectedUsageToday string, data interface{}) error {
+	q := url.Values{}
+	for k, v := range filters {
+		q.Set(k, "eq."+v)
+	}
+	// Доп. условие: обновляем только если usage_today всё ещё равен ожидаемому
+	q.Set("usage_today", "eq."+expectedUsageToday)
+
+	// Supabase с Prefer: return=minimal + count=exact вернёт 0 строк если условие не совпало
+	req, err := http.NewRequest("PATCH", c.baseURL+"/"+table+"?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	req2, err := http.NewRequest("PATCH", c.baseURL+"/"+table+"?"+q.Encode(), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req2.Header.Set("apikey", c.apiKey)
+	req2.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Prefer", "return=minimal,count=exact")
+	_ = req
+
+	resp, err := c.http.Do(req2)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("supabase error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Проверяем Content-Range: если 0 строк обновлено — кто-то опередил нас
+	contentRange := resp.Header.Get("Content-Range")
+	if contentRange == "*/0" || contentRange == "" {
+		return fmt.Errorf("atomic update: row was modified concurrently")
+	}
+	return nil
 }
 
 // Delete deletes rows matching filters
