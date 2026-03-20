@@ -1,10 +1,9 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,19 +11,7 @@ import (
 	"github.com/ssback/internal/db"
 	"github.com/ssback/internal/models"
 	"github.com/ssback/internal/services"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
-
-func googleOAuthConfig() *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     config.C.GoogleClientID,
-		ClientSecret: config.C.GoogleClientSecret,
-		RedirectURL:  "",
-		Scopes:       []string{"openid", "email", "profile"},
-		Endpoint:     google.Endpoint,
-	}
-}
 
 // POST /api/login
 func Login(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +36,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := services.CreateAccessToken(user.Username, user.IsAdmin)
 	if err != nil {
+		slog.Error("failed to create token", "err", err)
 		writeError(w, 500, "token error")
 		return
 	}
@@ -66,8 +54,8 @@ func Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "заполните все поля")
 		return
 	}
-	if len(req.Password) < 4 {
-		writeError(w, 400, "пароль не менее 4 символов")
+	if len(req.Password) < 8 {
+		writeError(w, 400, "пароль не менее 8 символов")
 		return
 	}
 
@@ -80,6 +68,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := services.HashPassword(req.Password)
 	if err != nil {
+		slog.Error("failed to hash password", "err", err)
 		writeError(w, 500, "hash error")
 		return
 	}
@@ -88,71 +77,18 @@ func Register(w http.ResponseWriter, r *http.Request) {
 		"username":      req.Username,
 		"password_hash": hash,
 	}, nil); err != nil {
+		slog.Error("failed to insert user", "username", req.Username, "err", err)
 		writeError(w, 500, "db error")
 		return
 	}
 	writeJSON(w, 201, map[string]bool{"success": true})
 }
 
-// GET /api/logout
+// POST /api/logout
 func Logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:    "access_token",
-		Value:   "",
-		Expires: time.Unix(0, 0),
-		MaxAge:  -1,
-		Path:    "/",
-	})
+	// Мобильный клиент сам удаляет токен из secure storage.
+	// Бэкенд просто подтверждает запрос.
 	writeJSON(w, 200, map[string]bool{"success": true})
-}
-
-// GET /auth/google/login
-func GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	cfg := googleOAuthConfig()
-	cfg.RedirectURL = fmt.Sprintf("%s://%s/auth/google/callback", scheme(r), r.Host)
-	url := cfg.AuthCodeURL("state-token", oauth2.AccessTypeOnline)
-	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
-}
-
-// GET /auth/google/callback
-func GoogleCallback(w http.ResponseWriter, r *http.Request) {
-	cfg := googleOAuthConfig()
-	cfg.RedirectURL = fmt.Sprintf("%s://%s/auth/google/callback", scheme(r), r.Host)
-
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		http.Redirect(w, r, "/login?error=google_auth_failed", http.StatusSeeOther)
-		return
-	}
-
-	oauthToken, err := cfg.Exchange(context.Background(), code)
-	if err != nil {
-		http.Redirect(w, r, "/login?error=google_auth_failed", http.StatusSeeOther)
-		return
-	}
-
-	email, err := getGoogleEmail(oauthToken.AccessToken)
-	if err != nil || email == "" {
-		http.Redirect(w, r, "/login?error=google_auth_failed", http.StatusSeeOther)
-		return
-	}
-
-	upsertGoogleUser(email)
-
-	token, err := services.CreateAccessToken(email, false)
-	if err != nil {
-		http.Redirect(w, r, "/login?error=token_error", http.StatusSeeOther)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "access_token",
-		Value:    "Bearer " + token,
-		HttpOnly: true,
-		MaxAge:   86400,
-		Path:     "/",
-	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // POST /api/google/mobile-auth
@@ -165,6 +101,7 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + req.IDToken)
 	if err != nil {
+		slog.Error("google tokeninfo request failed", "err", err)
 		writeError(w, 500, "google verification failed")
 		return
 	}
@@ -186,13 +123,11 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверяем что email подтверждён
 	if info.EmailVerified != "true" {
 		writeError(w, 401, "email not verified")
 		return
 	}
 
-	// Проверяем что токен выдан для нашего приложения
 	if config.C.GoogleClientID != "" && info.Aud != config.C.GoogleClientID {
 		writeError(w, 401, "token audience mismatch")
 		return
@@ -202,6 +137,7 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 
 	token, err := services.CreateAccessToken(info.Email, false)
 	if err != nil {
+		slog.Error("failed to create token for google user", "email", info.Email, "err", err)
 		writeError(w, 500, "token error")
 		return
 	}
@@ -212,41 +148,19 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// helpers
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 func upsertGoogleUser(email string) {
 	var existing models.User
 	_ = db.DB.SelectOne("user", map[string]string{"username": email}, &existing)
 	if existing.Username == "" {
 		hash, _ := services.HashPassword("oauth_user_" + email)
-		_ = db.DB.Insert("user", map[string]string{
+		if err := db.DB.Insert("user", map[string]string{
 			"username":      email,
 			"password_hash": hash,
-		}, nil)
+		}, nil); err != nil {
+			slog.Error("failed to upsert google user", "email", email, "err", err)
+		}
 	}
 }
 
-func getGoogleEmail(accessToken string) (string, error) {
-	req, _ := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var info struct {
-		Email string `json:"email"`
-	}
-	json.NewDecoder(resp.Body).Decode(&info)
-	return info.Email, nil
-}
-
-func scheme(r *http.Request) string {
-	if r.TLS != nil {
-		return "https"
-	}
-	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
-		return fwd
-	}
-	return "http"
-}
