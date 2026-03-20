@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -17,34 +18,34 @@ func main() {
 	config.Load()
 	db.Init()
 
+	// Лимитеры: auth — 10 попыток/мин, AI — 20 запросов/мин на IP
+	authLimiter := middleware.NewRateLimiter(10, time.Minute)
+	aiLimiter   := middleware.NewRateLimiter(20, time.Minute)
+
 	r := chi.NewRouter()
 
 	// Middleware
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://ssback-go.onrender.com", "http://localhost:*"},
+		AllowedOrigins:   []string{"http://localhost:*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
 	}))
 
-	// ── Public routes ─────────────────────────────────────────────────────────
-	r.Post("/api/login", handlers.Login)
-	r.Post("/api/register", handlers.Register)
-	r.Get("/api/logout", handlers.Logout)
+	// ── Public routes ──────────────────────────────────────────────────────────
+	r.With(authLimiter.Handler).Post("/api/login", handlers.Login)
+	r.With(authLimiter.Handler).Post("/api/register", handlers.Register)
+	r.Post("/api/logout", handlers.Logout)
 
-	// Google OAuth web flow
-	r.Get("/auth/google/login", handlers.GoogleLogin)
-	r.Get("/auth/google/callback", handlers.GoogleCallback)
+	// Google mobile auth (idToken от Flutter google_sign_in)
+	r.With(authLimiter.Handler).Post("/api/google/mobile-auth", handlers.GoogleMobileAuth)
 
-	// Google mobile auth (idToken from Flutter google_sign_in)
-	r.Post("/api/google/mobile-auth", handlers.GoogleMobileAuth)
-
-	// Public poem list
+	// Публичный список стихов
 	r.Get("/api/poems", handlers.GetPoems)
 
-	// ── Authenticated routes ──────────────────────────────────────────────────
+	// ── Authenticated routes ───────────────────────────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth)
 
@@ -53,8 +54,8 @@ func main() {
 		r.Post("/api/toggle_read", handlers.ToggleRead)
 		r.Post("/api/toggle_pin", handlers.TogglePin)
 
-		// AI
-		r.Post("/api/ai/chat", handlers.AIChat)
+		// AI — с отдельным лимитером
+		r.With(aiLimiter.Handler).Post("/api/ai/chat", handlers.AIChat)
 		r.Post("/api/ai/verify_key", handlers.AIVerifyKey)
 
 		// Admin only
