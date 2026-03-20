@@ -19,6 +19,9 @@ import (
 const groqModel = "moonshotai/kimi-k2-instruct"
 const groqURL   = "https://api.groq.com/openai/v1/chat/completions"
 
+// maxChatHistory — сколько сообщений хранить на пользователя в Supabase.
+const maxChatHistory = 40
+
 func GenerateAPIKey() string {
 	b := make([]byte, 24)
 	rand.Read(b)
@@ -62,7 +65,6 @@ func ValidateAndUseKey(key string) bool {
 		return false
 	}
 
-	// Проверка срока действия
 	if k.ExpiresAt != nil {
 		exp, err := time.Parse(time.RFC3339, *k.ExpiresAt)
 		if err == nil && time.Now().UTC().After(exp) {
@@ -72,23 +74,19 @@ func ValidateAndUseKey(key string) bool {
 
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// Сбрасываем счётчик если новый день
 	usageToday := k.UsageToday
 	if k.LastUsageDate == nil || *k.LastUsageDate != today {
 		usageToday = 0
 	}
 
-	// Проверка дневного лимита
 	if k.DailyLimit != nil && usageToday >= *k.DailyLimit {
 		return false
 	}
 
-	// Атомарное обновление: UPDATE только если usage_today не изменился
-	// пока мы читали (оптимистичная блокировка против race condition)
 	err := db.DB.UpdateAtomic(
 		"ai_keys",
 		map[string]string{"key": key},
-		fmt.Sprintf("%d", usageToday), // ожидаемое текущее значение
+		fmt.Sprintf("%d", usageToday),
 		map[string]interface{}{
 			"usage_today":     usageToday + 1,
 			"last_usage_date": today,
@@ -121,11 +119,20 @@ type dbChatRow struct {
 }
 
 func SaveChatMessage(username, role, content string) error {
-	return db.DB.Insert("ai_chat_history", map[string]string{
+	if err := db.DB.Insert("ai_chat_history", map[string]string{
 		"username": username,
 		"role":     role,
 		"content":  content,
-	}, nil)
+	}, nil); err != nil {
+		return err
+	}
+	// Ротация: удаляем старые записи в фоне, не задерживаем ответ клиенту.
+	go func() {
+		if err := db.DB.DeleteOldChatHistory(username, maxChatHistory); err != nil {
+			slog.Warn("chat history rotation failed", "user", username, "err", err)
+		}
+	}()
+	return nil
 }
 
 func GetChatHistory(username string) ([]models.ChatMessage, error) {
