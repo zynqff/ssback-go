@@ -11,7 +11,6 @@ import (
 	"github.com/ssback/internal/config"
 )
 
-// Client is a minimal Supabase REST client
 type Client struct {
 	baseURL string
 	apiKey  string
@@ -72,7 +71,6 @@ func (c *Client) do(method, path string, query url.Values, body interface{}, res
 	return nil
 }
 
-// Select returns rows from table with optional eq filters
 func (c *Client) Select(table string, filters map[string]string, result interface{}) error {
 	q := url.Values{}
 	q.Set("select", "*")
@@ -82,7 +80,6 @@ func (c *Client) Select(table string, filters map[string]string, result interfac
 	return c.do("GET", "/"+table, q, nil, result, "")
 }
 
-// SelectOne returns a single row or nil
 func (c *Client) SelectOne(table string, filters map[string]string, result interface{}) error {
 	q := url.Values{}
 	q.Set("select", "*")
@@ -102,12 +99,11 @@ func (c *Client) SelectOne(table string, filters map[string]string, result inter
 		return err
 	}
 	if len(arr) == 0 {
-		return nil // not found — caller checks
+		return nil
 	}
 	return json.Unmarshal(arr[0], result)
 }
 
-// Insert inserts a row and optionally returns inserted data
 func (c *Client) Insert(table string, data interface{}, result interface{}) error {
 	prefer := ""
 	if result != nil {
@@ -116,7 +112,6 @@ func (c *Client) Insert(table string, data interface{}, result interface{}) erro
 	return c.do("POST", "/"+table, nil, data, result, prefer)
 }
 
-// Update updates rows matching filters
 func (c *Client) Update(table string, filters map[string]string, data interface{}) error {
 	q := url.Values{}
 	for k, v := range filters {
@@ -125,39 +120,29 @@ func (c *Client) Update(table string, filters map[string]string, data interface{
 	return c.do("PATCH", "/"+table, q, data, nil, "return=minimal")
 }
 
-// UpdateAtomic обновляет строку только если usage_today совпадает с ожидаемым.
-// Это оптимистичная блокировка против race condition при параллельных запросах AI.
-// Если кто-то успел изменить счётчик раньше — Supabase не найдёт строку и вернёт ошибку.
+// UpdateAtomic — оптимистичная блокировка для AI-счётчика.
 func (c *Client) UpdateAtomic(table string, filters map[string]string, expectedUsageToday string, data interface{}) error {
 	q := url.Values{}
 	for k, v := range filters {
 		q.Set(k, "eq."+v)
 	}
-	// Доп. условие: обновляем только если usage_today всё ещё равен ожидаемому
 	q.Set("usage_today", "eq."+expectedUsageToday)
-
-	// Supabase с Prefer: return=minimal + count=exact вернёт 0 строк если условие не совпало
-	req, err := http.NewRequest("PATCH", c.baseURL+"/"+table+"?"+q.Encode(), nil)
-	if err != nil {
-		return err
-	}
 
 	b, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	req2, err := http.NewRequest("PATCH", c.baseURL+"/"+table+"?"+q.Encode(), bytes.NewReader(b))
+	req, err := http.NewRequest("PATCH", c.baseURL+"/"+table+"?"+q.Encode(), bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
-	req2.Header.Set("apikey", c.apiKey)
-	req2.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("Prefer", "return=minimal,count=exact")
-	_ = req
+	req.Header.Set("apikey", c.apiKey)
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=minimal,count=exact")
 
-	resp, err := c.http.Do(req2)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
@@ -168,7 +153,6 @@ func (c *Client) UpdateAtomic(table string, filters map[string]string, expectedU
 		return fmt.Errorf("supabase error %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Проверяем Content-Range: если 0 строк обновлено — кто-то опередил нас
 	contentRange := resp.Header.Get("Content-Range")
 	if contentRange == "*/0" || contentRange == "" {
 		return fmt.Errorf("atomic update: row was modified concurrently")
@@ -176,7 +160,6 @@ func (c *Client) UpdateAtomic(table string, filters map[string]string, expectedU
 	return nil
 }
 
-// Delete deletes rows matching filters
 func (c *Client) Delete(table string, filters map[string]string) error {
 	q := url.Values{}
 	for k, v := range filters {
@@ -185,7 +168,6 @@ func (c *Client) Delete(table string, filters map[string]string) error {
 	return c.do("DELETE", "/"+table, q, nil, nil, "")
 }
 
-// SelectOrdered returns rows ordered by a column
 func (c *Client) SelectOrdered(table string, filters map[string]string, orderBy string, desc bool, limit int, result interface{}) error {
 	q := url.Values{}
 	q.Set("select", "*")
@@ -201,4 +183,44 @@ func (c *Client) SelectOrdered(table string, filters map[string]string, orderBy 
 		q.Set("limit", fmt.Sprintf("%d", limit))
 	}
 	return c.do("GET", "/"+table, q, nil, result, "")
+}
+
+// DeleteOldChatHistory удаляет сообщения чата сверх keepCount на пользователя.
+// Вызывается фоново из services/ai.go после каждого SaveChatMessage.
+func (c *Client) DeleteOldChatHistory(username string, keepCount int) error {
+	q := url.Values{}
+	q.Set("select", "id")
+	q.Set("username", "eq."+username)
+	q.Set("order", "created_at.desc")
+	q.Set("offset", fmt.Sprintf("%d", keepCount))
+
+	var rows []struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.do("GET", "/ai_chat_history", q, nil, &rows, ""); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = fmt.Sprintf("%d", row.ID)
+	}
+
+	dq := url.Values{}
+	dq.Set("id", "in.("+joinCSV(ids)+")")
+	return c.do("DELETE", "/ai_chat_history", dq, nil, nil, "")
+}
+
+func joinCSV(ss []string) string {
+	out := ""
+	for i, s := range ss {
+		if i > 0 {
+			out += ","
+		}
+		out += s
+	}
+	return out
 }
