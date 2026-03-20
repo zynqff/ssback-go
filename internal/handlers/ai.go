@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -17,6 +18,10 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 	var req models.ChatRequest
 	if err := decode(r, &req); err != nil || req.Prompt == "" {
 		writeError(w, 400, "prompt required")
+		return
+	}
+	if len([]rune(req.Prompt)) > 2000 {
+		writeError(w, 400, "промпт слишком длинный (максимум 2000 символов)")
 		return
 	}
 
@@ -42,7 +47,8 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 
 	response, err := services.GetGroqResponse(req.Prompt, history)
 	if err != nil {
-		writeError(w, 500, "groq error: "+err.Error())
+		slog.Error("groq request failed", "user", claims.Subject, "err", err)
+		writeError(w, 500, "ошибка AI, попробуйте позже")
 		return
 	}
 
@@ -70,6 +76,7 @@ func AIVerifyKey(w http.ResponseWriter, r *http.Request) {
 	if err := db.DB.Update("user", map[string]string{"username": claims.Subject}, map[string]interface{}{
 		"user_gemini_key": req.Key,
 	}); err != nil {
+		slog.Error("failed to save user key", "user", claims.Subject, "err", err)
 		writeError(w, 500, "db error")
 		return
 	}
@@ -96,6 +103,7 @@ func AIGenerateKey(w http.ResponseWriter, r *http.Request) {
 
 	key, err := services.SaveAPIKey(claims.Subject, expiresAt, dailyLimit)
 	if err != nil {
+		slog.Error("failed to generate AI key", "admin", claims.Subject, "err", err)
 		writeError(w, 500, "failed to generate key")
 		return
 	}
@@ -107,13 +115,14 @@ func AIGetKeys(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 	keys, err := services.GetKeysForAdmin(claims.Subject)
 	if err != nil {
+		slog.Error("failed to get AI keys", "admin", claims.Subject, "err", err)
 		writeError(w, 500, "db error")
 		return
 	}
 	writeJSON(w, 200, keys)
 }
 
-// POST /api/ai/disable_key/{key} (admin)
+// POST /api/ai/disable_key (admin)
 func AIDisableKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Key string `json:"key"`
@@ -123,6 +132,7 @@ func AIDisableKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := services.DisableKey(req.Key); err != nil {
+		slog.Error("failed to disable AI key", "key", req.Key, "err", err)
 		writeError(w, 500, "db error")
 		return
 	}
