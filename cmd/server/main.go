@@ -18,17 +18,20 @@ func main() {
 	config.Load()
 	db.Init()
 
-	// Лимитеры: auth — 10 попыток/мин, AI — 20 запросов/мин на IP
 	authLimiter := middleware.NewRateLimiter(10, time.Minute)
 	aiLimiter   := middleware.NewRateLimiter(20, time.Minute)
 
 	r := chi.NewRouter()
 
-	// Middleware
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
+
+	allowedOrigins := config.C.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:*", "http://127.0.0.1:*"}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
@@ -38,11 +41,7 @@ func main() {
 	r.With(authLimiter.Handler).Post("/api/login", handlers.Login)
 	r.With(authLimiter.Handler).Post("/api/register", handlers.Register)
 	r.Post("/api/logout", handlers.Logout)
-
-	// Google mobile auth (idToken от Flutter google_sign_in)
 	r.With(authLimiter.Handler).Post("/api/google/mobile-auth", handlers.GoogleMobileAuth)
-
-	// Публичный список стихов
 	r.Get("/api/poems", handlers.GetPoems)
 
 	// ── Authenticated routes ───────────────────────────────────────────────────
@@ -54,17 +53,15 @@ func main() {
 		r.Post("/api/toggle_read", handlers.ToggleRead)
 		r.Post("/api/toggle_pin", handlers.TogglePin)
 
-		// AI — с отдельным лимитером
 		r.With(aiLimiter.Handler).Post("/api/ai/chat", handlers.AIChat)
 		r.Post("/api/ai/verify_key", handlers.AIVerifyKey)
 
-		// Admin only
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AdminOnly)
 
 			r.Post("/api/poems", handlers.AddPoem)
-			r.Put("/api/poems/{title}", handlers.EditPoem)
-			r.Delete("/api/poems/{title}", handlers.DeletePoem)
+			r.Put("/api/poems/{id}", handlers.EditPoem)
+			r.Delete("/api/poems/{id}", handlers.DeletePoem)
 
 			r.Post("/api/ai/generate_key", handlers.AIGenerateKey)
 			r.Get("/api/ai/keys", handlers.AIGetKeys)
@@ -72,7 +69,6 @@ func main() {
 		})
 	})
 
-	// Health check
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"message":"Сборник Стихов API (Go)","status":"ok"}`)
