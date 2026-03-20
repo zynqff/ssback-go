@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/ssback/internal/config"
 	"github.com/ssback/internal/db"
@@ -163,4 +162,3 @@ func upsertGoogleUser(email string) {
 		}
 	}
 }
-
