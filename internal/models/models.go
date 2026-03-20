@@ -4,7 +4,7 @@ import "time"
 
 type User struct {
 	Username      string  `json:"username"`
-	PasswordHash  string  `json:"-"`
+	PasswordHash  string  `json:"password_hash"` // было json:"-" — хеш не читался из Supabase
 	IsAdmin       bool    `json:"is_admin"`
 	ReadPoemsJSON []int64 `json:"read_poems_json"`
 	PinnedPoemID  *int64  `json:"pinned_poem_id"`
@@ -91,6 +91,7 @@ type GoogleMobileRequest struct {
 	IDToken string `json:"id_token"`
 }
 
+// MeResponse — то что отдаётся клиенту. PasswordHash здесь намеренно отсутствует.
 type MeResponse struct {
 	Username     string  `json:"username"`
 	IsAdmin      bool    `json:"is_admin"`
