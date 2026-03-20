@@ -9,6 +9,8 @@ import (
 	"github.com/ssback/internal/services"
 )
 
+const maxUserDataBytes = 2000
+
 // GET /api/me
 func GetMe(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
@@ -47,8 +49,8 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	update := map[string]interface{}{}
 
 	if req.NewPassword != nil {
-		if len(*req.NewPassword) < 4 {
-			writeError(w, 400, "пароль не менее 4 символов")
+		if len([]rune(*req.NewPassword)) < 8 {
+			writeError(w, 400, "пароль не менее 8 символов")
 			return
 		}
 		hash, err := services.HashPassword(*req.NewPassword)
@@ -60,6 +62,10 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UserData != nil {
+		if len(*req.UserData) > maxUserDataBytes {
+			writeError(w, 400, "заметки слишком длинные (максимум 2000 символов)")
+			return
+		}
 		update["user_data"] = *req.UserData
 	}
 
