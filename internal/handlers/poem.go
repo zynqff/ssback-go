@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ssback/internal/db"
@@ -52,9 +53,14 @@ func AddPoem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]interface{}{"success": true, "poem": p})
 }
 
-// PUT /api/poems/{title} (admin)
+// PUT /api/poems/{id} (admin)
 func EditPoem(w http.ResponseWriter, r *http.Request) {
-	originalTitle := chi.URLParam(r, "title")
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, 400, "invalid poem id")
+		return
+	}
 
 	var req models.PoemCreate
 	if err := decode(r, &req); err != nil {
@@ -67,13 +73,13 @@ func EditPoem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing models.Poem
-	_ = db.DB.SelectOne("poem", map[string]string{"title": originalTitle}, &existing)
+	_ = db.DB.SelectOne("poem", map[string]string{"id": idStr}, &existing)
 	if existing.Title == "" {
 		writeError(w, 404, "стих не найден")
 		return
 	}
 
-	if req.Title != originalTitle {
+	if req.Title != existing.Title {
 		var conflict models.Poem
 		_ = db.DB.SelectOne("poem", map[string]string{"title": req.Title}, &conflict)
 		if conflict.Title != "" {
@@ -82,25 +88,30 @@ func EditPoem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := db.DB.Update("poem", map[string]string{"title": originalTitle}, req); err != nil {
+	if err := db.DB.Update("poem", map[string]string{"id": idStr}, req); err != nil {
 		writeError(w, 500, "db error")
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"success": true})
 }
 
-// DELETE /api/poems/{title} (admin)
+// DELETE /api/poems/{id} (admin)
 func DeletePoem(w http.ResponseWriter, r *http.Request) {
-	title := chi.URLParam(r, "title")
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, 400, "invalid poem id")
+		return
+	}
 
 	var existing models.Poem
-	_ = db.DB.SelectOne("poem", map[string]string{"title": title}, &existing)
+	_ = db.DB.SelectOne("poem", map[string]string{"id": idStr}, &existing)
 	if existing.Title == "" {
 		writeError(w, 404, "стих не найден")
 		return
 	}
 
-	if err := db.DB.Delete("poem", map[string]string{"title": title}); err != nil {
+	if err := db.DB.Delete("poem", map[string]string{"id": idStr}); err != nil {
 		writeError(w, 500, "db error")
 		return
 	}
