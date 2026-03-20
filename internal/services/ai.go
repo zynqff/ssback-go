@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 )
 
 const groqModel = "moonshotai/kimi-k2-instruct"
-const groqURL = "https://api.groq.com/openai/v1/chat/completions"
+const groqURL   = "https://api.groq.com/openai/v1/chat/completions"
 
 func GenerateAPIKey() string {
 	b := make([]byte, 24)
@@ -53,11 +54,15 @@ func SaveAPIKey(generatedBy string, expiresAt *time.Time, dailyLimit *int) (stri
 
 func ValidateAndUseKey(key string) bool {
 	var k dbAIKey
-	err := db.DB.SelectOne("ai_keys", map[string]string{"key": key}, &k)
-	if err != nil || k.Key == "" || !k.IsActive {
+	if err := db.DB.SelectOne("ai_keys", map[string]string{"key": key}, &k); err != nil {
+		slog.Error("failed to select ai_key", "err", err)
+		return false
+	}
+	if k.Key == "" || !k.IsActive {
 		return false
 	}
 
+	// Проверка срока действия
 	if k.ExpiresAt != nil {
 		exp, err := time.Parse(time.RFC3339, *k.ExpiresAt)
 		if err == nil && time.Now().UTC().After(exp) {
@@ -66,19 +71,33 @@ func ValidateAndUseKey(key string) bool {
 	}
 
 	today := time.Now().UTC().Format("2006-01-02")
+
+	// Сбрасываем счётчик если новый день
 	usageToday := k.UsageToday
 	if k.LastUsageDate == nil || *k.LastUsageDate != today {
 		usageToday = 0
 	}
 
+	// Проверка дневного лимита
 	if k.DailyLimit != nil && usageToday >= *k.DailyLimit {
 		return false
 	}
 
-	_ = db.DB.Update("ai_keys", map[string]string{"key": key}, map[string]interface{}{
-		"usage_today":     usageToday + 1,
-		"last_usage_date": today,
-	})
+	// Атомарное обновление: UPDATE только если usage_today не изменился
+	// пока мы читали (оптимистичная блокировка против race condition)
+	err := db.DB.UpdateAtomic(
+		"ai_keys",
+		map[string]string{"key": key},
+		fmt.Sprintf("%d", usageToday), // ожидаемое текущее значение
+		map[string]interface{}{
+			"usage_today":     usageToday + 1,
+			"last_usage_date": today,
+		},
+	)
+	if err != nil {
+		slog.Warn("ai key atomic update failed (possible race), denying", "key", key)
+		return false
+	}
 	return true
 }
 
@@ -92,7 +111,7 @@ func GetKeysForAdmin(adminUsername string) ([]dbAIKey, error) {
 	return keys, err
 }
 
-// Chat history
+// ── Chat history ──────────────────────────────────────────────────────────────
 
 type dbChatRow struct {
 	Username  string `json:"username"`
@@ -122,7 +141,7 @@ func GetChatHistory(username string) ([]models.ChatMessage, error) {
 	return msgs, nil
 }
 
-// Groq request
+// ── Groq request ──────────────────────────────────────────────────────────────
 
 type groqMessage struct {
 	Role    string `json:"role"`
