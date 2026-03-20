@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"encoding/json"
-	"io"
+	"context"
 	"log/slog"
 	"net/http"
+
+	"google.golang.org/api/idtoken"
 
 	"github.com/ssback/internal/config"
 	"github.com/ssback/internal/db"
@@ -85,8 +86,6 @@ func Register(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/logout
 func Logout(w http.ResponseWriter, r *http.Request) {
-	// Мобильный клиент сам удаляет токен из secure storage.
-	// Бэкенд просто подтверждает запрос.
 	writeJSON(w, 200, map[string]bool{"success": true})
 }
 
@@ -98,56 +97,49 @@ func GoogleMobileAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + req.IDToken)
-	if err != nil {
-		slog.Error("google tokeninfo request failed", "err", err)
-		writeError(w, 500, "google verification failed")
+	if config.C.GoogleClientID == "" {
+		slog.Error("GOOGLE_CLIENT_ID not configured")
+		writeError(w, 500, "google auth not configured")
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	email, err := verifyGoogleIDToken(r.Context(), req.IDToken, config.C.GoogleClientID)
+	if err != nil {
+		slog.Warn("google id_token verification failed", "err", err)
 		writeError(w, 401, "invalid id_token")
 		return
 	}
 
-	var info struct {
-		Email         string `json:"email"`
-		Aud           string `json:"aud"`
-		EmailVerified string `json:"email_verified"`
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(body, &info); err != nil || info.Email == "" {
-		writeError(w, 401, "could not parse token info")
-		return
-	}
+	upsertGoogleUser(email)
 
-	if info.EmailVerified != "true" {
-		writeError(w, 401, "email not verified")
-		return
-	}
-
-	if config.C.GoogleClientID != "" && info.Aud != config.C.GoogleClientID {
-		writeError(w, 401, "token audience mismatch")
-		return
-	}
-
-	upsertGoogleUser(info.Email)
-
-	token, err := services.CreateAccessToken(info.Email, false)
+	token, err := services.CreateAccessToken(email, false)
 	if err != nil {
-		slog.Error("failed to create token for google user", "email", info.Email, "err", err)
+		slog.Error("failed to create token for google user", "email", email, "err", err)
 		writeError(w, 500, "token error")
 		return
 	}
 	writeJSON(w, 200, models.LoginResponse{
 		AccessToken: token,
 		IsAdmin:     false,
-		Username:    info.Email,
+		Username:    email,
 	})
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// verifyGoogleIDToken проверяет подпись токена локально через официальную
+// библиотеку google.golang.org/api/idtoken (уже есть в go.mod).
+// Кэширует публичные ключи Google — не делает HTTP-запрос на каждый вход.
+func verifyGoogleIDToken(ctx context.Context, rawToken, audience string) (string, error) {
+	payload, err := idtoken.Validate(ctx, rawToken, audience)
+	if err != nil {
+		return "", err
+	}
+	email, _ := payload.Claims["email"].(string)
+	emailVerified, _ := payload.Claims["email_verified"].(bool)
+	if email == "" || !emailVerified {
+		return "", http.ErrNoCookie // generic sentinel — caller logs it
+	}
+	return email, nil
+}
 
 func upsertGoogleUser(email string) {
 	var existing models.User
