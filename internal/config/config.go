@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	GoogleClientSecret string
 	SecretKey          string
 	Port               string
+	AllowedOrigins     []string
 }
 
 var C Config
@@ -29,6 +31,7 @@ func Load() {
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		SecretKey:          mustGet("SECRET_KEY"),
 		Port:               getOrDefault("PORT", "8000"),
+		AllowedOrigins:     parseList(os.Getenv("ALLOWED_ORIGINS")),
 	}
 }
 
@@ -45,4 +48,18 @@ func getOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func parseList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
