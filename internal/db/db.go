@@ -80,6 +80,17 @@ func (c *Client) Select(table string, filters map[string]string, result interfac
 	return c.do("GET", "/"+table, q, nil, result, "")
 }
 
+// SelectWithQuery — позволяет передать произвольные query-параметры (gte, lte, in и т.д.)
+func (c *Client) SelectWithQuery(table string, q url.Values, result interface{}) error {
+	if q == nil {
+		q = url.Values{}
+	}
+	if q.Get("select") == "" {
+		q.Set("select", "*")
+	}
+	return c.do("GET", "/"+table, q, nil, result, "")
+}
+
 func (c *Client) SelectOne(table string, filters map[string]string, result interface{}) error {
 	q := url.Values{}
 	q.Set("select", "*")
@@ -186,7 +197,6 @@ func (c *Client) SelectOrdered(table string, filters map[string]string, orderBy 
 }
 
 // DeleteOldChatHistory удаляет сообщения чата сверх keepCount на пользователя.
-// Вызывается фоново из services/ai.go после каждого SaveChatMessage.
 func (c *Client) DeleteOldChatHistory(username string, keepCount int) error {
 	q := url.Values{}
 	q.Set("select", "id")
