@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -23,6 +24,36 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 	if len([]rune(req.Prompt)) > 2000 {
 		writeError(w, 400, "промпт слишком длинный (максимум 2000 символов)")
 		return
+	}
+
+	// Проверяем ai_enabled из app_config
+	var aiEnabledRow struct {
+		Value string `json:"value"`
+	}
+	_ = db.DB.SelectOne("app_config", map[string]string{"key": "ai_enabled"}, &aiEnabledRow)
+	if aiEnabledRow.Value == "false" {
+		writeError(w, 503, "AI чат временно отключён администратором")
+		return
+	}
+
+	// Проверяем ai_daily_limit из app_config (не распространяется на админа)
+	if !claims.IsAdmin {
+		var limitRow struct {
+			Value string `json:"value"`
+		}
+		_ = db.DB.SelectOne("app_config", map[string]string{"key": "ai_daily_limit"}, &limitRow)
+		if limitRow.Value != "" && limitRow.Value != "0" {
+			var limit int
+			fmt.Sscanf(limitRow.Value, "%d", &limit)
+			if limit > 0 {
+				today := time.Now().UTC().Format("2006-01-02")
+				count, err := services.GetUserAIChatCountToday(claims.Subject, today)
+				if err == nil && count >= limit {
+					writeError(w, 429, fmt.Sprintf("достигнут дневной лимит AI (%d сообщений)", limit))
+					return
+				}
+			}
+		}
 	}
 
 	hasAccess := claims.IsAdmin
