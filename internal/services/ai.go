@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/ssback/internal/config"
@@ -146,6 +147,24 @@ func GetChatHistory(username string) ([]models.ChatMessage, error) {
 		msgs[i] = models.ChatMessage{Role: r.Role, Content: r.Content}
 	}
 	return msgs, nil
+}
+
+// GetUserAIChatCountToday — количество сообщений пользователя за сегодня.
+// Используется для проверки ai_daily_limit из app_config.
+func GetUserAIChatCountToday(username, today string) (int, error) {
+	q := url.Values{}
+	q.Set("select", "id")
+	q.Set("username", "eq."+username)
+	q.Set("role", "eq.user")
+	q.Set("created_at", "gte."+today+"T00:00:00Z")
+
+	var rows []struct {
+		ID int64 `json:"id"`
+	}
+	if err := db.DB.SelectWithQuery("ai_chat_history", q, &rows); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
 }
 
 // ── Groq request ──────────────────────────────────────────────────────────────
