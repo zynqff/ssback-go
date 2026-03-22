@@ -38,6 +38,7 @@ func main() {
 	}))
 
 	// ── Public routes ──────────────────────────────────────────────────────────
+	r.Get("/api/config", handlers.GetAppConfig)
 	r.With(authLimiter.Handler).Post("/api/login", handlers.Login)
 	r.With(authLimiter.Handler).Post("/api/register", handlers.Register)
 	r.Post("/api/logout", handlers.Logout)
