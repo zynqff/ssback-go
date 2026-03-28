@@ -9,7 +9,8 @@ import (
 
 type Config struct {
 	SupabaseURL        string
-	SupabaseKey        string
+	SupabaseKey        string // anon key — для чтения таблиц
+	SupabaseServiceKey string // service_role key — для Auth Admin API (OTP)
 	GroqAPIKey         string
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -26,6 +27,7 @@ func Load() {
 	C = Config{
 		SupabaseURL:        mustGet("SUPABASE_URL"),
 		SupabaseKey:        mustGet("SUPABASE_KEY"),
+		SupabaseServiceKey: getOrDefault("SUPABASE_SERVICE_KEY", ""),
 		GroqAPIKey:         os.Getenv("GROQ_API_KEY"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
