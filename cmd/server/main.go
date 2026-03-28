@@ -22,7 +22,6 @@ func main() {
 	aiLimiter   := middleware.NewRateLimiter(20, time.Minute)
 
 	r := chi.NewRouter()
-
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 
@@ -37,26 +36,35 @@ func main() {
 		AllowCredentials: false,
 	}))
 
-	// ── Public routes ──────────────────────────────────────────────────────────
+	// ── Public ────────────────────────────────────────────────────────────────
 	r.Get("/api/config", handlers.GetAppConfig)
-	r.With(authLimiter.Handler).Post("/api/login", handlers.Login)
-	r.With(authLimiter.Handler).Post("/api/register", handlers.Register)
-	r.Post("/api/logout", handlers.Logout)
-	r.With(authLimiter.Handler).Post("/api/google/mobile-auth", handlers.GoogleMobileAuth)
 	r.Get("/api/poems", handlers.GetPoems)
+	r.Post("/api/logout", handlers.Logout)
 
-	// ── Authenticated routes ───────────────────────────────────────────────────
+	// OTP (email-код через Supabase Auth)
+	r.With(authLimiter.Handler).Post("/api/auth/send_otp", handlers.SendOTP)
+	r.With(authLimiter.Handler).Post("/api/auth/verify_otp", handlers.VerifyOTP)
+	r.With(authLimiter.Handler).Post("/api/auth/register_otp", handlers.RegisterOTP)
+	r.Post("/api/auth/resolve_email", handlers.ResolveEmail)
+
+	// Google OAuth
+	r.With(authLimiter.Handler).Post("/api/google/mobile-auth", handlers.GoogleMobileAuth)
+
+	// ── Authenticated ─────────────────────────────────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth)
 
 		r.Get("/api/me", handlers.GetMe)
 		r.Post("/api/profile", handlers.UpdateProfile)
+		r.Post("/api/change_username", handlers.ChangeUsername)
+		r.Post("/api/change_email", handlers.ChangeEmail)
 		r.Post("/api/toggle_read", handlers.ToggleRead)
 		r.Post("/api/toggle_pin", handlers.TogglePin)
 
 		r.With(aiLimiter.Handler).Post("/api/ai/chat", handlers.AIChat)
 		r.Post("/api/ai/verify_key", handlers.AIVerifyKey)
 
+		// ── Admin ──────────────────────────────────────────────────────────
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AdminOnly)
 
