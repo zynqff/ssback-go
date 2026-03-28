@@ -4,7 +4,7 @@ import "time"
 
 type User struct {
 	Username      string  `json:"username"`
-	PasswordHash  string  `json:"password_hash"` // было json:"-" — хеш не читался из Supabase
+	Email         string  `json:"email"`
 	IsAdmin       bool    `json:"is_admin"`
 	ReadPoemsJSON []int64 `json:"read_poems_json"`
 	PinnedPoemID  *int64  `json:"pinned_poem_id"`
@@ -36,20 +36,51 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+type SendOTPRequest struct {
+	Email    string `json:"email"`
+	Username string `json:"username"` // только при регистрации (is_new=true)
+	IsNew    bool   `json:"is_new"`
 }
 
-type RegisterRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+type VerifyOTPRequest struct {
+	Email string `json:"email"`
+	Token string `json:"token"`
+}
+
+type GoogleMobileRequest struct {
+	IDToken string `json:"id_token"`
 }
 
 type LoginResponse struct {
 	AccessToken string `json:"access_token"`
 	IsAdmin     bool   `json:"is_admin"`
 	Username    string `json:"username"`
+}
+
+// ── User ──────────────────────────────────────────────────────────────────────
+
+type MeResponse struct {
+	Username     string  `json:"username"`
+	IsAdmin      bool    `json:"is_admin"`
+	ReadPoems    []int64 `json:"read_poems"`
+	PinnedPoemID *int64  `json:"pinned_poem_id"`
+	ShowAllTab   bool    `json:"show_all_tab"`
+	UserData     string  `json:"user_data"`
+}
+
+type UpdateProfileRequest struct {
+	UserData   *string `json:"user_data"`
+	ShowAllTab *bool   `json:"show_all_tab"`
+}
+
+type ChangeUsernameRequest struct {
+	NewUsername string `json:"new_username"`
+}
+
+type ChangeEmailRequest struct {
+	NewEmail string `json:"new_email"`
 }
 
 type ToggleRequest struct {
@@ -68,12 +99,6 @@ type PoemCreate struct {
 	Text   string `json:"text"`
 }
 
-type UpdateProfileRequest struct {
-	NewPassword *string `json:"new_password"`
-	UserData    *string `json:"user_data"`
-	ShowAllTab  *bool   `json:"show_all_tab"`
-}
-
 type ChatRequest struct {
 	Prompt string `json:"prompt"`
 }
@@ -85,18 +110,4 @@ type GenerateKeyRequest struct {
 
 type VerifyKeyRequest struct {
 	Key string `json:"key"`
-}
-
-type GoogleMobileRequest struct {
-	IDToken string `json:"id_token"`
-}
-
-// MeResponse — то что отдаётся клиенту. PasswordHash здесь намеренно отсутствует.
-type MeResponse struct {
-	Username     string  `json:"username"`
-	IsAdmin      bool    `json:"is_admin"`
-	ReadPoems    []int64 `json:"read_poems"`
-	PinnedPoemID *int64  `json:"pinned_poem_id"`
-	ShowAllTab   bool    `json:"show_all_tab"`
-	UserData     string  `json:"user_data"`
 }
